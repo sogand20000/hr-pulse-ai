@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 from backend.src.routes.ai import ai_router
+from backend.src.routes.langchain_ai import langchain_router
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.exceptions import HTTPException
@@ -29,7 +30,9 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Chat-ID"],
 )
+
 app.include_router(ai_router)
+app.include_router(langchain_router)
 
 
 @app.exception_handler(Exception)

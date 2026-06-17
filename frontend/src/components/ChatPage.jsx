@@ -5,6 +5,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const chatEndRef = useRef(null);
+  const [useLangChain, setUseLangChain] = useState(true);
   const [chatId, setChatId] = useState(() => {
     const storageChatID = localStorage.getItem("current_chat_id");
     return storageChatID ? parseInt(storageChatID, 10) : null;
@@ -50,7 +51,8 @@ export default function ChatPage() {
     setMessages((prev) => [...prev, { sender: "ai", text: "" }]);
 
     try {
-      const response = await fetch("/api/chat/stream", {
+      const targetUrl = useLangChain ? "/api/langchain/chat/stream" : "/api/chat/stream";
+      const response = await fetch(targetUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

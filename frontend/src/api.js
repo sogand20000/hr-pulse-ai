@@ -11,6 +11,10 @@ export const api = axios.create({
 export const sendChatMessage = async (payload) => {
   return await api.post("/chat", payload);
 };
+export const sendLangChainChatMessageStream = async (payload) => {
+  const response = await api.post("langchain/chat/stream", payload);
+  return response.data;
+};
 export const sendChatMessageStream = async (payload) => {
   const response = await api.post("/chat/stream", payload);
   return response.data;
