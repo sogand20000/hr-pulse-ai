@@ -1,6 +1,9 @@
 # langchain_service.py
 
-from backend.src.services.rag_service import retrieve_relevant_context
+from backend.src.services.rag_service import (
+    retrieve_relevant_context,
+    retrieve_similar_past_messages,
+)
 from backend.src.services.supabase_service import (
     save_chat_message_vector,
     update_chat_history,
@@ -36,12 +39,14 @@ async def execute_chain_with_retry(chain, input_data):
     return chain.astream(input_data)
 
 
-async def get_langchain_rag_stream(user_message: str, chat_id: int, chat_history: list):
+async def get_langchain_rag_stream(
+    user_message: str, chat_id: int, chat_history: list, user_id: int = None
+):
 
     if not llm:
         raise ValueError("LangChain LLM is not initialized")
 
-    window_size = 10
+    window_size = 2
     recent_messages = (
         chat_history[-window_size:] if len(chat_history) > window_size else chat_history
     )
@@ -62,13 +67,29 @@ async def get_langchain_rag_stream(user_message: str, chat_id: int, chat_history
     if not context_text:
         context_text = "No context found."
 
+    past_conversations_text = "No relevant past conversations found."
+
+    if user_id:
+        similar_msgs = await retrieve_similar_past_messages(
+            user_message, user_id, match_count=3, threshold=0.6
+        )
+        if similar_msgs:
+            formatted_past = []
+            for msg in similar_msgs:
+                sender_label = (
+                    "Employee" if msg.get("sender") == "user" else "HR Assistant"
+                )
+                formatted_past.append(f"- [{sender_label}]: {msg.get('message_text')}")
+            past_conversations_text = "\n".join(formatted_past)
+
     prompt = ChatPromptTemplate.from_messages(
         [
             (
                 "system",
-                "You are a professional AI assistant."
-                " Answer the user's question using the provided context.\n\n"
-                "[CONTEXT]\n{context}",
+                "You are a professional AI HR assistant. Answer the user's question using the provided company document context"
+                " and relevant past conversations from this specific employee (Semantic Memory) if available.\n\n"
+                "[COMPANY DOCUMENT CONTEXT]\n{context}\n\n"
+                "[EMPLOYEE'S PAST RELEVANT CONVERSATIONS (CROSS-SESSION)]\n{past_context}",
             ),
             MessagesPlaceholder(variable_name="history_placeholder"),
             ("human", "{question}"),
@@ -83,6 +104,7 @@ async def get_langchain_rag_stream(user_message: str, chat_id: int, chat_history
             chain,
             {
                 "context": context_text,
+                "past_context": past_conversations_text,
                 "question": user_message,
                 "history_placeholder": formatted_memory,
             },
@@ -108,18 +130,15 @@ async def get_langchain_rag_stream(user_message: str, chat_id: int, chat_history
             if chat_history and len(chat_history) > 0:
                 last_msg = chat_history[-1]
                 if isinstance(last_msg, dict):
-                    # اگر دیتای قدیمی یا دیکشنری بود
                     is_user_last = (
                         last_msg.get("role") == "user"
                         or last_msg.get("type") == "human"
                     )
                 else:
-                    # اگر آبجکت لنگ‌چین (HumanMessage) بود
                     is_user_last = getattr(last_msg, "type", "") == "human"
             if not is_user_last:
                 chat_history.append({"role": "user", "parts": [user_message]})
 
-            # ۴. اضافه کردن پاسخ کامل شده‌ی هوش مصنوعی
             if full_ai_response:
                 chat_history.append({"role": "model", "parts": [full_ai_response]})
             print(

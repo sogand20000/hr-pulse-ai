@@ -52,12 +52,13 @@ export default function ChatPage() {
 
     try {
       const targetUrl = useLangChain ? "/api/langchain/chat/stream" : "/api/chat/stream";
+      const userId = import.meta.env.VITE_DEV_USER_ID;
       const response = await fetch(targetUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ message: userMessage, chat_id: chatId }),
+        body: JSON.stringify({ message: userMessage, chat_id: chatId,user_id:userId }),
       });
 
       if (!response.ok) {

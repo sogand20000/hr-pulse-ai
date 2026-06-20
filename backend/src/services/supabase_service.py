@@ -1,5 +1,6 @@
 # supabase_service.py
 import os
+from uuid import UUID
 
 from supabase import acreate_client
 from supabase._async.client import AsyncClient
@@ -39,7 +40,10 @@ async def get_chat_by_id(chat_id: int):
     try:
         client = await get_supabase_client()
         db_response = (
-            await client.table("chats").select("history").eq("id", chat_id).execute()
+            await client.table("chats")
+            .select("history", "user_id")
+            .eq("id", chat_id)
+            .execute()
         )
 
         return db_response
@@ -70,13 +74,15 @@ async def update_chat_history(chat_id: int, chat_history: list):
         return None
 
 
-async def insert_new_chat_history(chat_history: list):
+async def insert_new_chat_history(chat_history: list, user_id: UUID):
 
     try:
         client = await get_supabase_client()
 
         insert_response = (
-            await client.table("chats").insert({"history": chat_history}).execute()
+            await client.table("chats")
+            .insert({"history": chat_history, "user_id": str(user_id)})
+            .execute()
         )
         return insert_response
     except Exception as e:

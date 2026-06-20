@@ -83,3 +83,48 @@ async def retrieve_relevant_context(
     except Exception as e:
         print(f"❌ [RAG] Error during retrieval: {e}")
         return ""
+
+
+async def retrieve_similar_past_messages(
+    query: str, user_id: int, match_count: int = 3, threshold: float = 0.5
+) -> list:
+    try:
+        print(
+            "⏳ [Semantic Memory] Generating async embedding for past message match..."
+        )
+
+        response = await ai_client.aio.models.embed_content(
+            model="gemini-embedding-001",
+            contents=query,
+            config=types.EmbedContentConfig(
+                task_type="RETRIEVAL_QUERY", output_dimensionality=768
+            ),
+        )
+        if not response.embeddings:
+            return []
+        query_embedding = response.embeddings[0].values
+        client = await get_supabase_client()
+
+        print(
+            f"⏳ [Semantic Memory] Calling match_chat_messages RPC for session {user_id}..."
+        )
+        db_response = await client.rpc(
+            "match_user_messages",
+            {
+                "query_embedding": query_embedding,
+                "match_threshold": threshold,
+                "match_count": match_count,
+                "user_id_param": str(user_id),
+            },
+        ).execute()
+        if db_response.data:
+            print(
+                f"✅ [Semantic Memory] Found {len(db_response.data)} similar past messages."
+            )
+            return db_response.data
+
+        return []
+
+    except Exception as e:
+        print(f"❌ [Semantic Memory] Error retrieving past messages: {e}")
+        return []
