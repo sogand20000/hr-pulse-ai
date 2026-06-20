@@ -1,5 +1,4 @@
-import asyncio
-from http.client import HTTPException
+# langchain_ai.py
 from typing import Optional
 
 from backend.src.services.langchain_service import get_langchain_rag_stream
@@ -7,7 +6,7 @@ from backend.src.services.supabase_service import (
     get_chat_by_id,
     insert_new_chat_history,
 )
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -29,7 +28,7 @@ async def langchain_chat_stream(body: LangChainChatBody):
     current_chat_id = None
 
     if chat_id is not None:
-        db_response = await asyncio.to_thread(get_chat_by_id, chat_id)
+        db_response = await get_chat_by_id(chat_id)
         if db_response and db_response.data and len(db_response.data) > 0:
             db_response = db_response.data[0]
             chat_history = db_response.get("history", [])
@@ -38,13 +37,14 @@ async def langchain_chat_stream(body: LangChainChatBody):
             raise HTTPException(status_code=404, detail="Chat ID not found")
 
     if current_chat_id is None:
-        insert_response = await asyncio.to_thread(insert_new_chat_history, chat_history)
+        insert_response = await insert_new_chat_history(chat_history)
         if insert_response and insert_response.data:
             current_chat_id = insert_response.data[0]["id"]
         else:
             raise HTTPException(status_code=500, detail="Database insert failed")
 
     async def event_generator():
+        print(f"chat_history in event_generator:{chat_history}")
         try:
             async for chunk in get_langchain_rag_stream(
                 user_message=user_message,

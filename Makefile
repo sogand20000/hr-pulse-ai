@@ -1,7 +1,7 @@
 .PHONY: run lint format test clean
 
 run:
-	PYTHONPATH=backend python -m backend.src.app
+	PYTHONUNBUFFERED=1 uvicorn backend.src.app:app --reload --port 5000
 lint:
 	ruff check .
 

@@ -1,41 +1,53 @@
-import asyncio
+# langchain_service.py
 
 from backend.src.services.rag_service import retrieve_relevant_context
-from backend.src.services.supabase_service import update_chat_history
+from backend.src.services.supabase_service import (
+    save_chat_message_vector,
+    update_chat_history,
+)
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_google_genai import ChatGoogleGenerativeAI
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 try:
     llm = ChatGoogleGenerativeAI(
-        model="gemini-3.5-flash", temperature=1.0, streaming=True
+        model="gemini-2.5-flash", temperature=1.0, streaming=True
     )
 except Exception as e:
     print(f"⚠️ Warning: Failed to initialize Gemini in LangChain: {e}")
     llm = None
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=6),
+    retry=retry_if_exception_type(Exception),
+    reraise=True,
+)
+async def execute_chain_with_retry(chain, input_data):
+    """Executes the LangChain stream with an automatic retry mechanism."""
+    return chain.astream(input_data)
+
+
 async def get_langchain_rag_stream(user_message: str, chat_id: int, chat_history: list):
 
     if not llm:
         raise ValueError("LangChain LLM is not initialized")
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                "Answer the user's question using the provided context below. "
-                "If the context does not contain the answer, rely on your general knowledge "
-                "but state clearly that it wasn't found in the documents.\n\n"
-                "[CONTEXT]\n{context}",
-            ),
-            MessagesPlaceholder(variable_name="history_placeholder"),
-            ("human", "{question}"),
-        ]
+
+    window_size = 10
+    recent_messages = (
+        chat_history[-window_size:] if len(chat_history) > window_size else chat_history
     )
 
     formatted_memory = []
-    for msg in chat_history:
+    for msg in recent_messages:
         role = msg.get("role")
         parts = msg.get("parts", [""])
         text_content = parts[0] if isinstance(parts, list) else str(parts)
@@ -45,23 +57,35 @@ async def get_langchain_rag_stream(user_message: str, chat_id: int, chat_history
         elif role in ["model", "assistant"]:
             formatted_memory.append(AIMessage(content=text_content))
 
-    context_text = await asyncio.to_thread(retrieve_relevant_context, user_message)
+    context_text = await retrieve_relevant_context(user_message)
 
     if not context_text:
         context_text = "No context found."
 
-    chat_history.append({"role": "user", "parts": [user_message]})
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                "You are a professional AI assistant."
+                " Answer the user's question using the provided context.\n\n"
+                "[CONTEXT]\n{context}",
+            ),
+            MessagesPlaceholder(variable_name="history_placeholder"),
+            ("human", "{question}"),
+        ]
+    )
 
     chain = prompt | llm | StrOutputParser()
-
     full_ai_response = ""
+
     try:
-        async_stream = chain.astream(
+        async_stream = await execute_chain_with_retry(
+            chain,
             {
                 "context": context_text,
                 "question": user_message,
                 "history_placeholder": formatted_memory,
-            }
+            },
         )
 
         async for chunk in async_stream:
@@ -69,16 +93,60 @@ async def get_langchain_rag_stream(user_message: str, chat_id: int, chat_history
                 text_chunk = str(chunk)
                 full_ai_response += text_chunk
                 yield f"data: {text_chunk}\n\n"
+
     except Exception as stream_err:
-        print(f"❌ Error during chain astream: {stream_err}")
+        print(f"❌ Critical: Chain execution failed after retries: {stream_err}")
         raise stream_err
 
     finally:
-        if chat_id and full_ai_response:
-            try:
-                chat_history.append({"role": "model", "parts": [full_ai_response]})
-                await asyncio.to_thread(update_chat_history, chat_id, chat_history)
-                print("✅ LangChain DB updated successfully!\n")
+        try:
+            print(
+                f"📋 [Finally] Raw chat_history content before sync: {chat_history}",
+                flush=True,
+            )
+            is_user_last = False
+            if chat_history and len(chat_history) > 0:
+                last_msg = chat_history[-1]
+                if isinstance(last_msg, dict):
+                    # اگر دیتای قدیمی یا دیکشنری بود
+                    is_user_last = (
+                        last_msg.get("role") == "user"
+                        or last_msg.get("type") == "human"
+                    )
+                else:
+                    # اگر آبجکت لنگ‌چین (HumanMessage) بود
+                    is_user_last = getattr(last_msg, "type", "") == "human"
+            if not is_user_last:
+                chat_history.append({"role": "user", "parts": [user_message]})
 
-            except Exception as db_err:
-                print(f"⚠️ Failed to save messages to Supabase: {db_err}")
+            # ۴. اضافه کردن پاسخ کامل شده‌ی هوش مصنوعی
+            if full_ai_response:
+                chat_history.append({"role": "model", "parts": [full_ai_response]})
+            print(
+                f"⏳ [Finally] Syncing history locally. Total items: {len(chat_history)}. Updating Supabase...",
+                flush=True,
+            )
+
+            db_res = await update_chat_history(chat_id, chat_history)
+            if db_res and hasattr(db_res, "data"):
+                print(
+                    f"✅ [Finally] History successfully synced in DB for chat ID {chat_id}",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"⚠️ [Finally] WARNING: Update query executed successfully, BUT affected 0 rows! Check if chat_id '{chat_id}' actually exists in 'chats' table.",
+                    flush=True,
+                )
+
+            if full_ai_response:
+                print(
+                    "⏳ [Finally] Saving message vectors to database...",
+                    flush=True,
+                )
+                await save_chat_message_vector(chat_id, "user", user_message)
+                await save_chat_message_vector(chat_id, "model", full_ai_response)
+                print("✅ [Finally] All message vectors processed.", flush=True)
+
+        except Exception as db_err:
+            print(f"⚠️ Non-blocking database sync failure: {db_err}")

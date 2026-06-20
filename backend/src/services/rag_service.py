@@ -1,5 +1,7 @@
+# rag_service.py
 import os
 
+from backend.src.services.supabase_service import get_supabase_client
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
@@ -8,17 +10,16 @@ load_dotenv()
 
 api_key = os.environ.get("GEMINI_API_KEY")
 
-client = genai.Client(api_key=api_key)
+ai_client = genai.Client(api_key=api_key)
 
 
-def get_embedding(text: str):
+def get_embedding(text: str, is_query: bool = False):
+    task = "RETRIEVAL_QUERY" if is_query else "RETRIEVAL_DOCUMENT"
     try:
-        response = client.models.embed_content(
+        response = ai_client.models.embed_content(
             model="gemini-embedding-001",
             contents=text,
-            config=types.EmbedContentConfig(
-                task_type="RETRIEVAL_DOCUMENT", output_dimensionality=768
-            ),
+            config=types.EmbedContentConfig(task_type=task, output_dimensionality=768),
         )
         if response.embeddings:
             return response.embeddings[0].values
@@ -29,15 +30,10 @@ def get_embedding(text: str):
         return None
 
 
-def retrieve_relevant_context(
+async def retrieve_relevant_context(
     query: str, match_count: int = None, threshold: float = None
 ) -> str:
 
-    from backend.src.services.supabase_service import supabase
-
-    if supabase is None:
-        print("❌ Supabase client is not initialized!")
-        return ""
     if match_count is None:
         env_count = os.environ.get("RAG_MATCH_COUNT")
         match_count = int(env_count) if env_count else 3
@@ -47,7 +43,7 @@ def retrieve_relevant_context(
         threshold = float(env_threshold) if env_threshold else 0.4
 
     try:
-        response = client.models.embed_content(
+        response = ai_client.models.embed_content(
             model="gemini-embedding-001",
             contents=query,
             config=types.EmbedContentConfig(
@@ -62,7 +58,8 @@ def retrieve_relevant_context(
         print(
             f"⏳ [RAG] Calling match_documents in Supabase (Threshold: {threshold})..."
         )
-        db_response = supabase.rpc(
+        client = await get_supabase_client()
+        db_response = await client.rpc(
             "match_documents",
             {
                 "query_embedding": query_embedding,
