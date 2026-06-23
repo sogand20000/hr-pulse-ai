@@ -7,7 +7,7 @@ from backend.src.services.supabase_service import (
     get_chat_by_id,
     insert_new_chat_history,
 )
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -25,7 +25,9 @@ class LangChainChatBody(BaseModel):
 
 
 @langchain_router.post("/chat/stream")
-async def langchain_chat_stream(body: LangChainChatBody):
+async def langchain_chat_stream(
+    body: LangChainChatBody, background_tasks: BackgroundTasks
+):
     user_message = body.message
     chat_id = body.chat_id
     user_id = str(body.user_id) if body.user_id else None
@@ -61,8 +63,10 @@ async def langchain_chat_stream(body: LangChainChatBody):
                 chat_id=current_chat_id,
                 chat_history=chat_history,
                 user_id=user_id,
+                background_tasks=background_tasks,
             ):
                 if chunk:
+                    print(f"🧱 Chunk received in router: {str(chunk)}", flush=True)
                     yield str(chunk)
 
         except Exception as e:

@@ -50,7 +50,7 @@ Below is the entity-relationship architecture visualization from the Supabase Sc
 │  chat_messages_vectors   │           │          chats           │
 ├──────────────────────────┤           ├──────────────────────────┤
 │ id (PK) [int8]           │           │ id (PK) [int8]           │
-│ session_id (FK) [int8] ──┼──────────►│ user_id [uuid]           │
+│ chat_id (FK) [int8] ──┼──────────►│ user_id [uuid]           │
 │ sender [text]            │           │ history [jsonb]          │
 │ message_text [text]      │           │ created_at [timestamptz] │
 │ embedding [vector]       │           └──────────────────────────┘
@@ -83,13 +83,13 @@ create or replace function public.match_user_messages (
   match_count int,
   user_id_param uuid
 )
-returns table (id bigint, session_id bigint, sender text, message_text text, similarity float)
+returns table (id bigint, chat_id bigint, sender text, message_text text, similarity float)
 language plpgsql as $$
 begin
   return query
-  select v.id, v.session_id, v.sender, v.message_text, 1 - (v.embedding <=> query_embedding) as similarity
+  select v.id, v.chat_id, v.sender, v.message_text, 1 - (v.embedding <=> query_embedding) as similarity
   from chat_messages_vectors v
-  inner join chats c on v.session_id = c.id
+  inner join chats c on v.chat_id = c.id
   where c.user_id = user_id_param and 1 - (v.embedding <=> query_embedding) > match_threshold
   order by v.embedding <=> query_embedding asc
   limit match_count;

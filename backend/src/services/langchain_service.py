@@ -1,6 +1,9 @@
 # langchain_service.py
 
+import asyncio
+
 from backend.src.services.rag_service import (
+    get_embedding,
     retrieve_relevant_context,
     retrieve_similar_past_messages,
 )
@@ -8,6 +11,7 @@ from backend.src.services.supabase_service import (
     save_chat_message_vector,
     update_chat_history,
 )
+from fastapi import BackgroundTasks
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -40,13 +44,17 @@ async def execute_chain_with_retry(chain, input_data):
 
 
 async def get_langchain_rag_stream(
-    user_message: str, chat_id: int, chat_history: list, user_id: int = None
+    user_message: str,
+    chat_id: int,
+    chat_history: list,
+    user_id: int,
+    background_tasks: BackgroundTasks,
 ):
 
     if not llm:
         raise ValueError("LangChain LLM is not initialized")
 
-    window_size = 2
+    window_size = 10
     recent_messages = (
         chat_history[-window_size:] if len(chat_history) > window_size else chat_history
     )
@@ -61,26 +69,41 @@ async def get_langchain_rag_stream(
             formatted_memory.append(HumanMessage(content=text_content))
         elif role in ["model", "assistant"]:
             formatted_memory.append(AIMessage(content=text_content))
-
-    context_text = await retrieve_relevant_context(user_message)
+    print(
+        "⏳ [Embedding] Generating single embedding shared across RAG and Semantic Memory..."
+    )
+    print("⏳ [Embedding] Generating single shared embedding...")
+    shared_embedding = await get_embedding(user_message)
+    context_task = retrieve_relevant_context(
+        query=user_message,
+        query_embedding=shared_embedding,
+        match_count=3,
+        threshold=0.6,
+    )
+    past_msg_task = (
+        retrieve_similar_past_messages(
+            query=user_message,
+            user_id=user_id,
+            query_embedding=shared_embedding,
+            match_count=3,
+            threshold=0.6,
+        )
+        if user_id
+        else asyncio.sleep(0, result=[])
+    )
+    context_text, similar_msgs = await asyncio.gather(context_task, past_msg_task)
 
     if not context_text:
         context_text = "No context found."
 
     past_conversations_text = "No relevant past conversations found."
 
-    if user_id:
-        similar_msgs = await retrieve_similar_past_messages(
-            user_message, user_id, match_count=3, threshold=0.6
-        )
-        if similar_msgs:
-            formatted_past = []
-            for msg in similar_msgs:
-                sender_label = (
-                    "Employee" if msg.get("sender") == "user" else "HR Assistant"
-                )
-                formatted_past.append(f"- [{sender_label}]: {msg.get('message_text')}")
-            past_conversations_text = "\n".join(formatted_past)
+    if user_id and similar_msgs:
+        formatted_past = []
+        for msg in similar_msgs:
+            sender_label = "Employee" if msg.get("sender") == "user" else "HR Assistant"
+            formatted_past.append(f"- [{sender_label}]: {msg.get('message_text')}")
+        past_conversations_text = "\n".join(formatted_past)
 
     prompt = ChatPromptTemplate.from_messages(
         [
@@ -146,25 +169,23 @@ async def get_langchain_rag_stream(
                 flush=True,
             )
 
-            db_res = await update_chat_history(chat_id, chat_history)
-            if db_res and hasattr(db_res, "data"):
-                print(
-                    f"✅ [Finally] History successfully synced in DB for chat ID {chat_id}",
-                    flush=True,
-                )
-            else:
-                print(
-                    f"⚠️ [Finally] WARNING: Update query executed successfully, BUT affected 0 rows! Check if chat_id '{chat_id}' actually exists in 'chats' table.",
-                    flush=True,
-                )
+            background_tasks.add_task(update_chat_history, chat_id, chat_history)
 
             if full_ai_response:
                 print(
                     "⏳ [Finally] Saving message vectors to database...",
                     flush=True,
                 )
-                await save_chat_message_vector(chat_id, "user", user_message)
-                await save_chat_message_vector(chat_id, "model", full_ai_response)
+                background_tasks.add_task(
+                    save_chat_message_vector,
+                    chat_id,
+                    "user",
+                    user_message,
+                    shared_embedding,
+                )
+                background_tasks.add_task(
+                    save_chat_message_vector, chat_id, "model", full_ai_response, None
+                )
                 print("✅ [Finally] All message vectors processed.", flush=True)
 
         except Exception as db_err:

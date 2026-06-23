@@ -5,34 +5,26 @@ from uuid import UUID
 from supabase import acreate_client
 from supabase._async.client import AsyncClient
 
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
 supabase: AsyncClient = None
-
-
-async def init_supabase():
-    global supabase
-
-    SUPABASE_URL = os.environ.get("SUPABASE_URL")
-    SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-
-    if SUPABASE_URL and SUPABASE_KEY:
-        if supabase is None:
-            supabase = await acreate_client(SUPABASE_URL, SUPABASE_KEY)
-            print("⚡ Supabase Async Client initialized successfully!")
-    else:
-        print("❌ Supabase environment variables are missing!")
 
 
 async def get_supabase_client() -> AsyncClient:
     global supabase
     if supabase is None:
-        SUPABASE_URL = os.environ.get("SUPABASE_URL")
-        SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-
-        if SUPABASE_URL and SUPABASE_KEY:
-            supabase = await acreate_client(SUPABASE_URL, SUPABASE_KEY)
-        else:
-            raise RuntimeError("Supabase credentials missing in environment variables.")
+        if not SUPABASE_URL or not SUPABASE_KEY:
+            raise RuntimeError(
+                "❌ Supabase credentials missing in environment variables."
+            )
+        supabase = await acreate_client(SUPABASE_URL, SUPABASE_KEY)
+        print("⚡ Supabase Async Client initialized successfully!")
     return supabase
+
+
+async def init_supabase():
+    await get_supabase_client()
 
 
 async def get_chat_by_id(chat_id: int):
@@ -101,7 +93,7 @@ async def insert_document(content: str, metadata: dict = None):
         success_all = True
 
         for i, chunk in enumerate(chunks):
-            embedding = get_embedding(chunk)
+            embedding = await get_embedding(chunk)
 
             if not embedding:
                 print(f"❌ Failed to generate embedding for chunk #{i + 1}")
@@ -160,32 +152,41 @@ def chunk_text_smart(text: str, chunk_size: int = 1000, overlap: int = 200) -> l
     return chunks
 
 
-async def save_chat_message_vector(session_id: int, sender: str, message_text: str):
+async def save_chat_message_vector(
+    chat_id: int, sender: str, message_text: str, shared_embedding: list = None
+):
     print(f"✅ Vector saved successfully for role: {sender}")
     try:
         from backend.src.services.rag_service import get_embedding
 
         is_query = True if sender == "user" else False
-        vector = get_embedding(message_text, is_query)
+        if shared_embedding is None:
+            print(f"⏳ [Vector Sync] Generating embedding for {sender} response...")
+            shared_embedding = await get_embedding(message_text, is_query)
 
-        if not vector:
+        else:
+            print(
+                f"⚡ [Vector Sync] Using shared embedding for {sender} message. Skipping API call!"
+            )
+        if not shared_embedding:
             print("❌ Embedding generation failed, skipping database insert.")
             return
+
         client = await get_supabase_client()
         await (
             client.table("chat_messages_vectors")
             .insert(
                 {
-                    "session_id": session_id,
+                    "chat_id": chat_id,
                     "sender": sender,
                     "message_text": message_text,
-                    "embedding": vector,
+                    "embedding": shared_embedding,
                 }
             )
             .execute()
         )
 
-        print(f"✅ Successfully saved {sender} message vector for session {session_id}")
+        print(f"✅ Successfully saved {sender} message vector for session {chat_id}")
 
     except Exception as e:
         print(f"❌ Error in save_chat_message_vector: {e}")
