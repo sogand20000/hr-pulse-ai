@@ -1,4 +1,5 @@
 # langchain_ai.py
+import logging
 from typing import Optional
 from uuid import UUID
 
@@ -10,6 +11,8 @@ from backend.src.services.supabase_service import (
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 langchain_router = APIRouter(prefix="/api/langchain", tags=["LangChain RAG Chat"])
 
@@ -56,7 +59,6 @@ async def langchain_chat_stream(
             raise HTTPException(status_code=500, detail="Database insert failed")
 
     async def event_generator():
-        print(f"chat_history in event_generator:{chat_history}")
         try:
             async for chunk in get_langchain_rag_stream(
                 user_message=user_message,
@@ -66,11 +68,10 @@ async def langchain_chat_stream(
                 background_tasks=background_tasks,
             ):
                 if chunk:
-                    print(f"🧱 Chunk received in router: {str(chunk)}", flush=True)
                     yield str(chunk)
 
         except Exception as e:
-            print(f"❌ Error during LangChain RAG streaming: {e}")
+            logger.error(f"Error during LangChain RAG streaming: {e}", exc_info=True)
             yield "data: [An error occurred during LangChain streaming]\n\n"
 
     return StreamingResponse(

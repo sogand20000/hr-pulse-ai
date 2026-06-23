@@ -1,6 +1,7 @@
 # langchain_service.py
 
 import asyncio
+import logging
 
 from backend.src.services.rag_service import (
     get_embedding,
@@ -23,12 +24,15 @@ from tenacity import (
     wait_exponential,
 )
 
+logger = logging.getLogger(__name__)
 try:
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash", temperature=1.0, streaming=True
     )
 except Exception as e:
-    print(f"⚠️ Warning: Failed to initialize Gemini in LangChain: {e}")
+    logger.error(
+        f"⚠️ Warning: Failed to initialize Gemini in LangChain: {e}", exc_info=True
+    )
     llm = None
 
 
@@ -69,10 +73,7 @@ async def get_langchain_rag_stream(
             formatted_memory.append(HumanMessage(content=text_content))
         elif role in ["model", "assistant"]:
             formatted_memory.append(AIMessage(content=text_content))
-    print(
-        "⏳ [Embedding] Generating single embedding shared across RAG and Semantic Memory..."
-    )
-    print("⏳ [Embedding] Generating single shared embedding...")
+
     shared_embedding = await get_embedding(user_message)
     context_task = retrieve_relevant_context(
         query=user_message,
@@ -140,15 +141,13 @@ async def get_langchain_rag_stream(
                 yield f"data: {text_chunk}\n\n"
 
     except Exception as stream_err:
-        print(f"❌ Critical: Chain execution failed after retries: {stream_err}")
+        logger.error(
+            f"Critical: Chain execution failed after retries: {e}", exc_info=True
+        )
         raise stream_err
 
     finally:
         try:
-            print(
-                f"📋 [Finally] Raw chat_history content before sync: {chat_history}",
-                flush=True,
-            )
             is_user_last = False
             if chat_history and len(chat_history) > 0:
                 last_msg = chat_history[-1]
@@ -164,18 +163,10 @@ async def get_langchain_rag_stream(
 
             if full_ai_response:
                 chat_history.append({"role": "model", "parts": [full_ai_response]})
-            print(
-                f"⏳ [Finally] Syncing history locally. Total items: {len(chat_history)}. Updating Supabase...",
-                flush=True,
-            )
 
             background_tasks.add_task(update_chat_history, chat_id, chat_history)
 
             if full_ai_response:
-                print(
-                    "⏳ [Finally] Saving message vectors to database...",
-                    flush=True,
-                )
                 background_tasks.add_task(
                     save_chat_message_vector,
                     chat_id,
@@ -186,7 +177,8 @@ async def get_langchain_rag_stream(
                 background_tasks.add_task(
                     save_chat_message_vector, chat_id, "model", full_ai_response, None
                 )
-                print("✅ [Finally] All message vectors processed.", flush=True)
 
         except Exception as db_err:
-            print(f"⚠️ Non-blocking database sync failure: {db_err}")
+            logger.error(
+                f" Non-blocking database sync failure: {db_err}", exc_info=True
+            )

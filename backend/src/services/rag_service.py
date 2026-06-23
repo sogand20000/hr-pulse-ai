@@ -1,4 +1,5 @@
 # rag_service.py
+import logging
 import os
 
 from backend.src.services.supabase_service import get_supabase_client
@@ -6,6 +7,7 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
+logger = logging.getLogger(__name__)
 load_dotenv()
 
 api_key = os.environ.get("GEMINI_API_KEY")
@@ -26,7 +28,7 @@ async def get_embedding(text: str, is_query: bool = False) -> list:
         return None
 
     except Exception as e:
-        print(f"❌ Error generating embedding: {e}")
+        logger.error(f"Error generating embedding: {e}", exc_info=True)
         return None
 
 
@@ -52,9 +54,6 @@ async def retrieve_relevant_context(
         if not query_embedding:
             return []
 
-        print(
-            f"⏳ [RAG] Calling match_documents in Supabase (Threshold: {threshold})..."
-        )
         client = await get_supabase_client()
         db_response_documents = await client.rpc(
             "match_documents",
@@ -64,21 +63,16 @@ async def retrieve_relevant_context(
                 "match_count": match_count,
             },
         ).execute()
-        print(f"📊 [RAG] Database raw response: {db_response_documents.data}")
-        if db_response_documents.data and len(db_response_documents.data) > 0:
-            for i, row in enumerate(db_response_documents.data):
-                print(
-                    f"📌 Match #{i + 1}: ID={row['id']} | Similarity={row.get('similarity')}  | Text={row['content'][:30]}..."
-                )
 
+        if db_response_documents.data and len(db_response_documents.data) > 0:
             context_list = [row["content"] for row in db_response_documents.data]
             return "\n\n---\n\n".join(context_list)
 
-        print("🔍 [RAG] No relevant context met the threshold in database.")
         return ""
 
     except Exception as e:
-        print(f"❌ [RAG] Error during retrieval: {e}")
+        logger.error(f"[RAG] Error during retrieval: {e}", exc_info=True)
+
         return ""
 
 
@@ -101,9 +95,6 @@ async def retrieve_similar_past_messages(
 
         client = await get_supabase_client()
 
-        print(
-            f"⏳ [Semantic Memory] Calling match_chat_messages RPC for session {user_id}..."
-        )
         db_response_past_messages = await client.rpc(
             "match_user_messages",
             {
@@ -114,13 +105,12 @@ async def retrieve_similar_past_messages(
             },
         ).execute()
         if db_response_past_messages.data:
-            print(
-                f"✅ [Semantic Memory] Found {len(db_response_past_messages.data)} similar past messages."
-            )
             return db_response_past_messages.data
 
         return []
 
     except Exception as e:
-        print(f"❌ [Semantic Memory] Error retrieving past messages: {e}")
+        logger.error(
+            f"[Semantic Memory] Error retrieving past messages: {e}", exc_info=True
+        )
         return []

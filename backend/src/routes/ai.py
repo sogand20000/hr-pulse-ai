@@ -1,4 +1,5 @@
 # ai.py
+import logging
 from typing import Optional
 
 from backend.src.services.supabase_service import (
@@ -16,6 +17,7 @@ from tenacity import (
     wait_exponential,
 )
 
+logging = logging.getLogger(__name__)
 ai_router = APIRouter(prefix="/api", tags=["AI  Chat"])
 
 
@@ -31,7 +33,10 @@ class ChatBody(BaseModel):
 try:
     ai_client = genai.Client()
 except Exception as e:
-    print(f"⚠️ Warning: Failed to initialize Gemini Client in blueprint: {e}")
+    logging.error(
+        f"⚠️ Warning: Failed to initialize Gemini Client in blueprint: {e}",
+        exc_info=True,
+    )
     ai_client = None
 
 
@@ -56,13 +61,11 @@ async def call_gemini_with_retry_content_stream(client, history):
 @ai_router.get("/chat/{chat_id}/history")
 async def get_chat_history(chat_id: int):
     try:
-        print(f"📥 [Route] Fetching history for chat_id: {chat_id}", flush=True)
-
         db_response = await get_chat_by_id(chat_id)
         if not db_response or not hasattr(db_response, "data") or not db_response.data:
-            print(
+            logging.error(
                 f"⚠️ [Route] Chat ID {chat_id} not found or DB error occurred.",
-                flush=True,
+                exc_info=True,
             )
             return {"status": "success", "messages": []}
         raw_history = db_response.data[0].get("history", [])

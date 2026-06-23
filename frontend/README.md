@@ -1,116 +1,96 @@
-# 🧠 HR-Pulse.AI | Enterprise RAG Chatbot Platform
+# 🧠 PulseHR | Enterprise RAG Chatbot Platform
 
-**HR-Pulse.AI** is a domain-agnostic, high-performance **RAG-powered AI Chatbot** designed to act as an intelligent knowledge base assistant. While pre-configured in this repository with an **Enterprise Human Resources (HR) & Internal Policy** use-case, the core architecture is entirely dynamic. The chatbot's expertise automatically adapts to whatever knowledge base or documentation is injected into its vector database.
-
-Instead of relying on generic AI knowledge, this chatbot utilizes a modern **Retrieval-Augmented Generation (RAG)** architecture. This ensures that every response is strictly grounded in the organization's official documentation, eliminating hallucinations and ensuring data trustworthiness.
+**PulseHR** is a domain-agnostic, high-performance **RAG-powered AI Chatbot** designed to act as an intelligent knowledge base assistant. While pre-configured in this repository with an **Enterprise Human Resources (HR) & Internal Policy** use-case, the core architecture is entirely dynamic and adapts to any injected knowledge base.
 
 ---
 
 ## 🏗️ Core Architecture & Tech Stack
 
-The application is split into a modular, decoupled architecture optimized for speed, scalability, and network resilience:
+The application follows a modular, decoupled architecture optimized for speed, scalability, and network resilience:
 
-* **Frontend:** Built with **React** to deliver a smooth, intuitive, and responsive chat interface for the users.
-* **Backend API:** Powered by **FastAPI (Python)**, leveraging asynchronous programming (`async/await`) to handle high-concurrency streaming effortlessly.
-* **AI & Orchestration Ecosystem:**
-    * **LangChain (LCEL):** Used to construct clean, industrial LLM chains and prompt templates.
-    * **Google Gemini (gemini-2.5-flash):** The core Large Language Model used for text generation, configured with streaming enabled for a dynamic user experience.
-* **Database & Vector Storage:** **Supabase (PostgreSQL)** acts as the central backbone:
-    * Stores and syncs historical conversational logs.
-    * Utilizes `pgvector` to perform highly accurate semantic similarity searches (`match_documents`) using `gemini-embedding-001`.
-* **Resiliency Layer:** Integrated with **Tenacity** to guard streaming channels against transient network drops or API timeout failures.
+* **Frontend:** React (Responsive UI).
+* **Backend API:** FastAPI (Python) using asynchronous patterns (`async/await`) and `asyncio.gather`.
+* **AI & Orchestration:** LangChain (LCEL) & Google Gemini (gemini-2.5-flash).
+* **Database & Vector Storage:** Supabase (PostgreSQL) with `pgvector` for semantic search.
+* **Performance:** Optimized with **Background Tasks** for non-blocking persistence and **Shared Embedding** strategy for reduced latency.
+* **Resiliency:** Integrated with **Tenacity** for robust API error handling.
 
 ---
 
-## 🚀 Key Features
+## 🚀 Key Features & Performance
 
-* **Real-time Streaming Responses:** Utilizes Server-Sent Events (SSE) via FastAPI's `StreamingResponse` to deliver instant, word-by-word text generation to the React frontend.
-* **Context-Aware RAG Integration:** Automatically embeds user queries in real-time, queries the Supabase vector store, and injects relevant company documentation blocks into the LLM context window.
-* **Cross-Session Semantic Memory:** Remembers user-specific details (e.g., name, age, preferences) shared in older, completely separate chat sessions, preventing the LLM from experiencing context amnesia across chat switches.
-* **Intelligent History Synced Database:** Conversational histories are mapped into native LangChain Message schemas (`HumanMessage`/`AIMessage`) and dynamically updated back to Supabase without blocking the streaming UI.
+* **Non-Blocking Persistence:** Vector embeddings for AI responses are generated and stored via background workers, keeping the UI fluid.
+* **Optimized Latency:** Parallel execution of RAG and Memory retrieval.
+* **Context-Aware RAG:** Grounds responses in official documentation while maintaining persistent semantic memory across sessions.
+* **Shared Embedding Strategy:** Reuses embeddings across the pipeline to minimize API costs and latency.
+
+---
+## 🖥️ User Interface Preview
+<div align="center">
+   <img src="./src/assets/preview.png" alt="PulseHR Interface" width="500" />
+   <p><i>PulseHR: Multi-turn RAG conversation demonstration.</i></p>
+</div>
+
+*The intuitive interface designed for seamless interaction with the organizational knowledge base, providing real-time, grounded responses.*
+
 ---
 
-## 🗄️ Database Schema & Data Models
+## 🛠 Technical Competencies Demonstrated
 
-The platform leverages **Supabase (PostgreSQL)** with the `pgvector` extension to store knowledge base documents, manage user sessions, and maintain vector-embedded chat histories. 
+By building this platform, I have demonstrated proficiency in:
 
-Below is the entity-relationship architecture visualization from the Supabase Schema Visualizer:
+* **Advanced AI Orchestration:** Mastery of **LangChain (LCEL)** for complex LLM workflows and state management.
+* **Asynchronous Systems Engineering:** Architecting non-blocking pipelines using **FastAPI** to ensure high throughput.
+* **Vector Database Optimization:** Deep understanding of **pgvector** and **HNSW Indexing** for production-grade semantic search performance.
+* **Memory & Context Engineering:** Implementation of hybrid memory architectures (Short-term buffer + Long-term Vector Recall).
+* **Scalable API Design:** Experience in building robust, resilient APIs with automated retry mechanisms and structured data flow.
+
+---
+
+## 🗄️ Database Schema & Setup
+
+The platform leverages **Supabase (PostgreSQL)** with `pgvector`. 
+
+> **Deployment Guide:** For the complete database setup (tables, HNSW indexes, and RPC functions), refer to the [**`database_setup.sql`**](database_schema.sql) file. Simply copy and execute its content in your Supabase SQL Editor.
+
+
+
+---
+
+## 🧠 Memory Management
+
+The platform implements a **Two-Tier Hybrid Memory Architecture**:
+
+1. **Short-Term Memory:** A sliding window buffer for active chat context.
+2. **Long-Term Semantic Memory:** Uses vector search (`match_user_messages`) to recall user facts from previous sessions.
+
+### 🔄 Context Fusion Lifecycle
 
 ```text
-               ┌──────────────────────────┐
-               │        documents         │
-               ├──────────────────────────┤
-               │ id (PK)                  │
-               │ content [text]           │
-               │ metadata [jsonb]         │
-               │ embedding [vector]       │
-               └──────────────────────────┘
-
-┌──────────────────────────┐           ┌──────────────────────────┐
-│  chat_messages_vectors   │           │          chats           │
-├──────────────────────────┤           ├──────────────────────────┤
-│ id (PK) [int8]           │           │ id (PK) [int8]           │
-│ chat_id (FK) [int8] ──┼──────────►│ user_id [uuid]           │
-│ sender [text]            │           │ history [jsonb]          │
-│ message_text [text]      │           │ created_at [timestamptz] │
-│ embedding [vector]       │           └──────────────────────────┘
-│ created_at [timestamptz] │
-└──────────────────────────┘
-```
----
-
-
-## 🧠 Memory Management & Context Optimization
-
-In LLM-based chat applications, sending the entire historical conversation with every new user request leads to exponential token costs and increased Time-To-First-Token (TTFT) latency. 
-
-To overcome this, this platform implements an advanced **Two-Tier Hybrid Memory Architecture** that guarantees both immediate flow and long-term personalization:
-
-### 1. Short-Term Memory (Sliding Window Buffer)
-For the active chat session, the chat history is constrained by a sliding window mechanism. Only the most recent messages are passed linearly into the immediate prompt conversation array, keeping token overhead at a bare minimum while maintaining conversational continuity:
-
-
-
-### 2. Long-Term Semantic Memory (Cross-Session Knowledge)
-When a user opens a brand new chat session, the short-term sliding window is naturally empty ([]). To prevent the chatbot from losing all user context, an asynchronous vector search layer is triggered globally across all historic chats belonging to that specific User UUID.
-
-The backend invokes a custom Supabase PostgreSQL RPC function match_user_messages to fetch historically relevant facts or profile points previously stated by the employee:
-
-``` sql
-create or replace function public.match_user_messages (
-  query_embedding vector(768),
-  match_threshold float,
-  match_count int,
-  user_id_param uuid
-)
-returns table (id bigint, chat_id bigint, sender text, message_text text, similarity float)
-language plpgsql as $$
-begin
-  return query
-  select v.id, v.chat_id, v.sender, v.message_text, 1 - (v.embedding <=> query_embedding) as similarity
-  from chat_messages_vectors v
-  inner join chats c on v.chat_id = c.id
-  where c.user_id = user_id_param and 1 - (v.embedding <=> query_embedding) > match_threshold
-  order by v.embedding <=> query_embedding asc
-  limit match_count;
-end;
-$$;
-```
-
-
- ### 🔄 Context Fusion Lifecycle
- 
-Whenever a user submits a query, the context undergoes a unified compilation before hitting the Gemini API:
-
-```
 [User Query]
-     │
-     ├───► Vector Search (Company Docs) ───► [COMPANY DOCUMENT CONTEXT] ───┐
-     │                                                                     ├───► [Fused Gemini Prompt]
-     ├───► Vector Search (User History) ───► [SEMANTIC MEMORY CONTEXT]  ───┤
-     │                                                                     │
-     └───► Linear Active History        ───► [SHORT-TERM SLIDING WINDOW] ──┘
-
+      │
+      ├───► Vector Search (Company Docs) ───► [COMPANY CONTEXT] ───┐
+      │                                                           ├───► [Fused Gemini Prompt]
+      ├───► Vector Search (User History) ───► [SEMANTIC MEMORY]  ──┤
+      │                                                           │
+      └───► Linear Active History ───► [SHORT-TERM SLIDING WINDOW] ─┘
 ```
+ ## 🛠 Installation
 
-This hybrid approach ensures that if a user states their name or age in Chat #1, and later asks an unrelated policy question in Chat #2, the system seamlessly recalls their user metadata from the vector space and crafts a tailored, contextual response without blowing up the token window.
+### Clone the repository:
+
+      git clone [https://github.com/sogand20000/hr-pulse-ai.git](https://github.com/sogand20000/hr-pulse-ai.git)
+
+### Install dependencies:
+
+      pip install -r requirements.txt
+
+### Configure Environment:
+
+        Create a .env file and add your SUPABASE_URL, SUPABASE_KEY, and GEMINI_API_KEY.
+
+ ### Deploy Schema:
+    Run the SQL scripts provided in database_schema.sql on your Supabase instance.
+
+### Run the server:  
+      uvicorn main:app --reload

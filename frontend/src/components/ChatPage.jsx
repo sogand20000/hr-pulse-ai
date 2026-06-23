@@ -145,10 +145,10 @@ export default function ChatPage() {
     <div className="flex flex-col h-screen bg-slate-900 text-slate-100 font-sans">
       <header className="py-4 px-6 bg-slate-800/50 border-b border-slate-700/50 backdrop-blur text-center">
         <h1 className="text-xl font-bold tracking-wide text-cyan-400">
-          Gemini AI Assistant
+          PulseHR
         </h1>
         <p className="text-xs text-slate-400 mt-1">
-          Powered by Flask & React (v4)
+         PulseHR - Intelligent Knowledge Assistant
         </p>
       </header>
 
