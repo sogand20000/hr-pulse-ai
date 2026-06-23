@@ -1,20 +1,30 @@
+# app.py
 import os
-from pathlib import Path
+from contextlib import asynccontextmanager
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from backend.src.routes.ai import ai_router
+from backend.src.routes.langchain_ai import langchain_router
+from backend.src.services.supabase_service import init_supabase
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.exceptions import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
-load_dotenv()
-basedir = Path(__file__).resolve().parent.parent
-load_dotenv(os.path.join(basedir, ".env"))
-
 frontend_folder = os.path.join(os.getcwd(), "frontend", "dist")
 
-app = FastAPI(title="Flask-to-FastAPI Production Boilerplate")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_supabase()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 origins = [
     "http://localhost:5177",
@@ -29,7 +39,9 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Chat-ID"],
 )
+
 app.include_router(ai_router)
+app.include_router(langchain_router)
 
 
 @app.exception_handler(Exception)

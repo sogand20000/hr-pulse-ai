@@ -1,43 +1,44 @@
+# rag_service.py
+import logging
 import os
 
+from backend.src.services.supabase_service import get_supabase_client
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
+logger = logging.getLogger(__name__)
 load_dotenv()
 
 api_key = os.environ.get("GEMINI_API_KEY")
 
-client = genai.Client(api_key=api_key)
+ai_client = genai.Client(api_key=api_key)
 
 
-def get_embedding(text: str):
+async def get_embedding(text: str, is_query: bool = False) -> list:
+    task = "RETRIEVAL_QUERY" if is_query else "RETRIEVAL_DOCUMENT"
     try:
-        response = client.models.embed_content(
+        response = await ai_client.aio.models.embed_content(
             model="gemini-embedding-001",
             contents=text,
-            config=types.EmbedContentConfig(
-                task_type="RETRIEVAL_DOCUMENT", output_dimensionality=768
-            ),
+            config=types.EmbedContentConfig(task_type=task, output_dimensionality=768),
         )
         if response.embeddings:
             return response.embeddings[0].values
         return None
 
     except Exception as e:
-        print(f"❌ Error generating embedding: {e}")
+        logger.error(f"Error generating embedding: {e}", exc_info=True)
         return None
 
 
-def retrieve_relevant_context(
-    query: str, match_count: int = None, threshold: float = None
+async def retrieve_relevant_context(
+    query: str,
+    query_embedding: list = None,
+    match_count: int = None,
+    threshold: float = None,
 ) -> str:
 
-    from backend.src.services.supabase_service import supabase
-
-    if supabase is None:
-        print("❌ Supabase client is not initialized!")
-        return ""
     if match_count is None:
         env_count = os.environ.get("RAG_MATCH_COUNT")
         match_count = int(env_count) if env_count else 3
@@ -47,22 +48,14 @@ def retrieve_relevant_context(
         threshold = float(env_threshold) if env_threshold else 0.4
 
     try:
-        response = client.models.embed_content(
-            model="gemini-embedding-001",
-            contents=query,
-            config=types.EmbedContentConfig(
-                task_type="RETRIEVAL_QUERY", output_dimensionality=768
-            ),
-        )
+        if query_embedding is None:
+            query_embedding = await get_embedding(query)
 
-        if not response.embeddings:
-            return ""
+        if not query_embedding:
+            return []
 
-        query_embedding = response.embeddings[0].values
-        print(
-            f"⏳ [RAG] Calling match_documents in Supabase (Threshold: {threshold})..."
-        )
-        db_response = supabase.rpc(
+        client = await get_supabase_client()
+        db_response_documents = await client.rpc(
             "match_documents",
             {
                 "query_embedding": query_embedding,
@@ -70,19 +63,54 @@ def retrieve_relevant_context(
                 "match_count": match_count,
             },
         ).execute()
-        print(f"📊 [RAG] Database raw response: {db_response.data}")
-        if db_response.data and len(db_response.data) > 0:
-            for i, row in enumerate(db_response.data):
-                print(
-                    f"📌 Match #{i + 1}: ID={row['id']} | Similarity={row.get('similarity')}  | Text={row['content'][:30]}..."
-                )
 
-            context_list = [row["content"] for row in db_response.data]
+        if db_response_documents.data and len(db_response_documents.data) > 0:
+            context_list = [row["content"] for row in db_response_documents.data]
             return "\n\n---\n\n".join(context_list)
 
-        print("🔍 [RAG] No relevant context met the threshold in database.")
         return ""
 
     except Exception as e:
-        print(f"❌ [RAG] Error during retrieval: {e}")
+        logger.error(f"[RAG] Error during retrieval: {e}", exc_info=True)
+
         return ""
+
+
+async def retrieve_similar_past_messages(
+    query: str,
+    user_id: int,
+    query_embedding: list = None,
+    match_count: int = 3,
+    threshold: float = 0.5,
+) -> list:
+    try:
+        if query_embedding is None:
+            query_embedding = await get_embedding(query)
+
+        if not query_embedding:
+            return ""
+
+        if not query_embedding:
+            return []
+
+        client = await get_supabase_client()
+
+        db_response_past_messages = await client.rpc(
+            "match_user_messages",
+            {
+                "query_embedding": query_embedding,
+                "match_threshold": threshold,
+                "match_count": match_count,
+                "user_id_param": str(user_id),
+            },
+        ).execute()
+        if db_response_past_messages.data:
+            return db_response_past_messages.data
+
+        return []
+
+    except Exception as e:
+        logger.error(
+            f"[Semantic Memory] Error retrieving past messages: {e}", exc_info=True
+        )
+        return []

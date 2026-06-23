@@ -5,6 +5,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const chatEndRef = useRef(null);
+  const [useLangChain, setUseLangChain] = useState(true);
   const [chatId, setChatId] = useState(() => {
     const storageChatID = localStorage.getItem("current_chat_id");
     return storageChatID ? parseInt(storageChatID, 10) : null;
@@ -50,12 +51,14 @@ export default function ChatPage() {
     setMessages((prev) => [...prev, { sender: "ai", text: "" }]);
 
     try {
-      const response = await fetch("/api/chat/stream", {
+      const targetUrl = useLangChain ? "/api/langchain/chat/stream" : "/api/chat/stream";
+      const userId = import.meta.env.VITE_DEV_USER_ID;
+      const response = await fetch(targetUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ message: userMessage, chat_id: chatId }),
+        body: JSON.stringify({ message: userMessage, chat_id: chatId,user_id:userId }),
       });
 
       if (!response.ok) {
@@ -142,10 +145,10 @@ export default function ChatPage() {
     <div className="flex flex-col h-screen bg-slate-900 text-slate-100 font-sans">
       <header className="py-4 px-6 bg-slate-800/50 border-b border-slate-700/50 backdrop-blur text-center">
         <h1 className="text-xl font-bold tracking-wide text-cyan-400">
-          Gemini AI Assistant
+          PulseHR
         </h1>
         <p className="text-xs text-slate-400 mt-1">
-          Powered by Flask & React (v4)
+         PulseHR - Intelligent Knowledge Assistant
         </p>
       </header>
 
