@@ -27,7 +27,7 @@ The application follows a modular, decoupled architecture optimized for speed, s
 ---
 ## 🖥️ User Interface Preview
 <div align="center">
-   <img src="./src/assets/preview.png" alt="PulseHR Interface" width="500" />
+   <img src="./frontend/src/assets/preview.png" alt="PulseHR Interface" width="500" />
    <p><i>PulseHR: Multi-turn RAG conversation demonstration.</i></p>
 </div>
 
