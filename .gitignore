@@ -21,6 +21,6 @@ __pycache__/
 *.pyc
 **/__pycache__/
 backend/src/**/__pycache__/
-
+backend/venv
 # Environment variables
 .env

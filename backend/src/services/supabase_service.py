@@ -1,6 +1,7 @@
 # supabase_service.py
 import logging
 import os
+from typing import Optional
 from uuid import UUID
 
 from supabase import acreate_client
@@ -63,14 +64,17 @@ async def update_chat_history(chat_id: int, chat_history: list):
         return None
 
 
-async def insert_new_chat_history(chat_history: list, user_id: UUID):
-
+async def insert_new_chat_history(chat_history: list, user_id: Optional[UUID] = None):
     try:
         client = await get_supabase_client()
 
+        valid_user_id = None
+        if user_id and str(user_id).strip().lower() != "none":
+            valid_user_id = str(user_id)
+
         insert_response = (
             await client.table("chats")
-            .insert({"history": chat_history, "user_id": str(user_id)})
+            .insert({"history": chat_history, "user_id": valid_user_id})
             .execute()
         )
         return insert_response
